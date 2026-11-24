@@ -1006,7 +1006,14 @@ const PAR_JOUR = 360, AGE_ABAT = 101, RENDEMENT = 0.95;
 function planAbattages(fin = "2027-12-31") {
   const C = lastC || compute(), td = today(), jours = [];
   // 1. Abattages déjà prévus : canards en salle de gavage, avec leur date d'abattage.
-  for (const L of C.lots) for (const [b, arr] of Object.entries(L.bandes || {})) for (const bd of arr) if (bd.n > 0 && bd.ab && bd.ab >= td) jours.push({ date: bd.ab, lot: L.numero, n: bd.n, salle: b, gav: bd.entree, reel: true });
+  // 0. Départs abattoir déjà saisis depuis le lundi de cette semaine (salle de gavage ou PAG pour le maigre), avec le lieu.
+  const lun = mondayOf(td), faits = state.mvts.filter(m => m.type === "sortie" && /abattoir/i.test(m.dest || "") && m.date >= lun && ["gav", "pag"].includes(stadeOf(m.de)));
+  for (const m of faits) {
+    const maigre = stadeOf(m.de) === "pag", tr = maigre ? null : state.mvts.find(t => t.type === "transfert" && t.vers === m.de && String(t.lotId) === String(m.lotId) && t.dateAbattage === m.date);
+    jours.push({ date: m.date, lot: m.lotId, n: m.nombre || 0, tout: !!m.tout && !m.nombre, salle: m.de, qui: m.qui || "", gav: tr?.date || null, reel: true, fait: true, maigre });
+  }
+  const dejaSortis = new Set(faits.map(m => m.date + "|" + m.de));
+  for (const L of C.lots) for (const [b, arr] of Object.entries(L.bandes || {})) for (const bd of arr) if (bd.n > 0 && bd.ab && bd.ab >= td && !dejaSortis.has(bd.ab + "|" + b)) jours.push({ date: bd.ab, lot: L.numero, n: bd.n, salle: b, gav: bd.entree, reel: true });
   // 2. Lots encore en poussinière / PAG, puis lots à venir : à la suite, 360 par jour d'abattage.
   const aVenir = [];
   for (const L of C.lots.filter(l => !l.fini && l.date).sort((a, b) => a.date.localeCompare(b.date))) {
@@ -1016,7 +1023,7 @@ function planAbattages(fin = "2027-12-31") {
   const P = planning(30), base = state.lots.filter(l => l.date).sort((a, b) => a.date.localeCompare(b.date)).at(-1)?.nombre || 2700;
   for (const e of P.futur) aVenir.push({ numero: e.numero, date: e.date, n: Math.round(base * RENDEMENT), prevu: true });
   // Un jour d'abattage = 360 places ; un lot peut finir un jour et le suivant compléter ce même jour.
-  const libre = {}; for (const j of jours) libre[j.date] = Math.max(0, (libre[j.date] ?? PAR_JOUR) - j.n);
+  const libre = {}; for (const j of jours.filter(j => !j.maigre)) libre[j.date] = Math.max(0, (libre[j.date] ?? PAR_JOUR) - j.n);
   let cur = nextAbat(td);
   for (const j of jours) if (j.date > cur || (j.date === cur && !libre[cur])) cur = libre[j.date] ? j.date : nextAbat(addDays(j.date, 1));
   for (const a of aVenir) {
@@ -1055,8 +1062,8 @@ function planSemaines() {
         ` ${court(j.gav)} · lot ${j.lot} · ${j.n}` + (j.salle ? " · " + batShort(j.salle) : "") + ` · pour l'abattage du ${court(j.date)}`)),
       ...w.mep.map(e => el("div", { class: "num" }, el("span", { class: "chip dot st-pous" }, "Mise en place poussinière"), ` ${court(e.date)} · lot ${e.numero} · ${batShort(e.up)}` + (e.reel ? " (faite)" : ""))),
       w.ab.length && (w.gav.length || w.mep.length) ? el("div", { class: "sub", style: "margin-top:2px" }, "Abattages") : null,
-      ...w.ab.map(j => el("div", { class: "num" }, el("span", { class: "chip " + (j.reel ? "dot st-gav" : "out") }, j.reel ? "Abattage" : "Abattage estimé"),
-        ` ${court(j.date)} · lot ${j.lot} · ${j.n}` + (j.salle ? " · " + batShort(j.salle) : "") + (j.gav ? ` · gavage ${court(j.gav)}` : "") + (PLAN_BY[j.date]?.note ? " · " + PLAN_BY[j.date].note : ""))),
+      ...w.ab.map(j => el("div", { class: "num" }, el("span", { class: "chip " + (j.reel ? "dot st-gav" : "out") }, j.maigre ? "Départ maigre" : j.fait ? (j.date < td ? "Abattu" : "Départ abattoir") : j.reel ? "Abattage" : "Abattage estimé"),
+        ` ${court(j.date)} · lot ${j.lot} · ${j.tout ? "toute la bande" : j.n}` + (j.salle ? " · " + batShort(j.salle) : "") + (j.qui ? " → " + j.qui : "") + (j.gav ? ` · gavage ${court(j.gav)}` : "") + (!j.maigre && PLAN_BY[j.date]?.note ? " · " + PLAN_BY[j.date].note : ""))),
       !w.ab.length && !w.mep.length && !w.gav.length ? el("div", { class: "sub" }, "Rien de prévu") : null)),
     total > 10 ? el("button", { type: "button", class: "btn", onclick: () => { planTout = !planTout; renderPlan(); } }, planTout ? "Voir moins" : "Voir jusqu'à fin 2027") : null,
   ];
