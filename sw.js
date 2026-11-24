@@ -1,6 +1,6 @@
 // Garde l'appli dans le téléphone pour l'ouvrir sans connexion, et sert les photos / PDF rangés sur l'appareil.
 // Les échanges avec la feuille Google ne passent pas par ce cache.
-const CACHE = "canards-gs-v1";
+const CACHE = "canards-gs-v2";
 const FILES = ["./", "index.html", "config.js", "gs.js",
   "manifest.webmanifest", "icon-192.png", "icon-512.png", "pdf-lib.min.js", "fontkit.umd.min.js", "ica-gras.pdf", "ica-maigre.pdf", "comicneue.ttf"];
 
@@ -25,6 +25,17 @@ self.addEventListener("fetch", e => {
     return;
   }
   if (e.request.method !== "GET" || !(same || fonts)) return;
+  // Page de l'appli : on prend la version en ligne d'abord (mises à jour visibles tout de suite), le cache seulement sans réseau.
+  if (same && (e.request.mode === "navigate" || /\/(index\.html)?$/.test(url.pathname))) {
+    e.respondWith(caches.open(CACHE).then(async c => {
+      try {
+        const r = await Promise.race([fetch(e.request, { cache: "no-store" }), new Promise((_, rej) => setTimeout(() => rej(new Error("lent")), 5000))]);
+        if (r && r.ok) { c.put("index.html", r.clone()); return r; }
+      } catch (_) {}
+      return (await c.match("index.html")) || (await c.match(e.request, { ignoreSearch: true })) || new Response("Hors ligne", { status: 504 });
+    }));
+    return;
+  }
   e.respondWith(caches.open(CACHE).then(async c => {
     const hit = await c.match(e.request, { ignoreSearch: true });
     const net = fetch(e.request).then(r => { if (r && (r.ok || r.type === "opaque")) c.put(e.request, r.clone()); return r; }).catch(() => null);
