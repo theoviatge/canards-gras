@@ -1,5 +1,3 @@
-Le voici. Copie tout le bloc ci-dessous et colle-le dans la grande zone, avec gs.js comme nom :
-
 // Registre des canards gras : version GitHub synchronisée avec Google Sheets (Apps Script).
 // Chaque saisie est gardée dans le téléphone puis envoyée à la feuille « Canards gras – synchro ».
 // Sans réseau, les saisies attendent et partent toutes seules au retour du réseau.
