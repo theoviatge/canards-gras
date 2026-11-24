@@ -5,7 +5,8 @@
 <link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes">
 <style>body{margin:0}</style>
-<script src="local.js"></script></head><body>
+<script src="config.js"></script>
+<script src="gs.js"></script></head><body>
 <title>Registre des canards gras</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -195,7 +196,7 @@ pre.copy{white-space:pre-wrap;font-family:var(--body);font-size:.9rem;background
 
   <!-- LOTS -->
   <section data-view="lots" hidden>
-    <div class="row"><h2>Lots</h2><span class="btns"><button class="btn small" id="syncBtn" type="button" hidden>Hors ligne</button><button class="btn small" id="exportBtn" type="button" hidden>Exporter (CSV)</button></span></div>
+    <div class="row"><h2>Lots</h2><span class="btns"><button class="btn small" id="syncBtn" type="button" hidden>Données</button><button class="btn small" id="exportBtn" type="button" hidden>Exporter (CSV)</button></span></div>
     <div class="seg" id="lotFilter" role="group" aria-label="Filtrer les lots">
       <button type="button" data-f="actif" aria-pressed="true">En cours</button>
       <button type="button" data-f="fini" aria-pressed="false">Terminés</button>
@@ -1777,7 +1778,7 @@ async function syncExport() {
   for (const [c, get] of SYNC_COLS) out[c] = get().map(d => { const { id, ...rest } = d; return { id, data: rest }; });
   const dl = window.claude ? await claude.use("downloads") : null;
   if (!dl) return toast("Export indisponible ici");
-  const name = "canards-" + (window.HORS_LIGNE ? "hors-ligne" : "en-ligne") + "-" + today() + ".json";
+  const name = "canards-" + (window.MODE_FIREBASE ? "sauvegarde" : window.HORS_LIGNE ? "hors-ligne" : "en-ligne") + "-" + today() + ".json";
   try { await dl.save({ filename: name, data: JSON.stringify(out) }); toast("Fichier " + name + " enregistré"); } catch (e) { if (e && e.code !== "declined") toast("Export impossible"); }
 }
 async function syncImport(file, mode, msgEl) {
@@ -1803,6 +1804,16 @@ function openSync() {
   const msg = el("div", { class: "status err" });
   const pick = mode => { const i = el("input", { type: "file", accept: ".json,application/json", hidden: true, onchange: e => { const f = e.target.files[0]; if (f) { msg.className = "status"; msg.textContent = "Import en cours…"; syncImport(f, mode, msg); } } }); document.body.append(i); i.click(); setTimeout(() => i.remove(), 60000); };
   const off = !!window.HORS_LIGNE;
+  if (window.MODE_FIREBASE || window.MODE_SHEETS) return openSheet(() => [
+    el("div", { class: "row" }, el("h2", {}, "Données et compte"), closeBtn()),
+    el("div", { class: "sub" }, "Cette appli est partagée en direct entre tous les appareils connectés, même après une saisie sans réseau. Pour reprendre le registre de l'appli claude.ai : dans l'appli claude.ai, Lots › Hors ligne › « Exporter pour la version hors ligne », puis ici « Importer un fichier »."),
+    el("div", { class: "btns" }, el("button", { type: "button", class: "btn primary", style: "flex:1", onclick: () => pick("ajouter") }, "Importer un fichier")),
+    el("div", { class: "btns" }, el("button", { type: "button", class: "btn", style: "flex:1", onclick: syncExport }, "Exporter une sauvegarde")),
+    el("small", { class: "sub" }, "L'import ajoute seulement les saisies qui manquent : rien n'est effacé. Les photos et les PDF restent sur l'appareil qui les a faits."),
+    msg,
+    window.MODE_SHEETS
+      ? el("div", { class: "row" }, el("span", { class: "sub" }, window.connTexte()), el("button", { type: "button", class: "btn small", onclick: () => window.syncMaintenant() }, "Synchroniser maintenant"))
+      : el("div", { class: "row" }, el("span", { class: "sub" }, "Connecté : " + (window.fbCompte && window.fbCompte() || "?")), el("button", { type: "button", class: "btn small", onclick: () => window.fbDeconnexion() }, "Se déconnecter"))]);
   openSheet(() => [
     el("div", { class: "row" }, el("h2", {}, off ? "Échanger avec l'appli en ligne" : "Version hors ligne"), closeBtn()),
     el("div", { class: "sub" }, off
@@ -1832,7 +1843,7 @@ renderAll();
   $("#exportBtn").hidden = false; $("#syncBtn").hidden = false;
   claude.use("assets").then(a => { state.assets = a; if (!$('[data-view="mep"]').hidden) renderMep(); if (state.sheet) state.sheet(); });
   const onErr = () => { $("#conn").textContent = "Déconnecté"; $("#conn").className = "status err"; };
-  const live = () => { $("#conn").textContent = window.HORS_LIGNE ? "Hors ligne · sur cet appareil" : state.canWrite ? "Partagé · à jour" : "Lecture seule"; $("#conn").className = "status"; };
+  const live = () => { $("#conn").textContent = window.connTexte ? window.connTexte() : window.HORS_LIGNE ? "Hors ligne · sur cet appareil" : state.canWrite ? "Partagé · à jour" : "Lecture seule"; $("#conn").className = "status"; };
   db.collection("lots").onSnapshot(s => {
     state.lots = s.docs.map(d => ({ id: d.id, ...d.data() }));
     if (!s.metadata?.fromCache) state.loaded.lots = true;
