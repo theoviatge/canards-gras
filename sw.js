@@ -1,15 +1,16 @@
 // Garde l'appli dans le téléphone pour l'ouvrir sans connexion, et sert les photos / PDF rangés sur l'appareil.
-const CACHE = "canards-v1";
-const FILES = ["./", "index.html", "local.js", "manifest.webmanifest", "icon-192.png", "icon-512.png",
-  "pdf-lib.min.js", "fontkit.umd.min.js", "ica-gras.pdf", "ica-maigre.pdf", "comicneue.ttf"];
+// Les échanges avec la feuille Google ne passent pas par ce cache.
+const CACHE = "canards-gs-v1";
+const FILES = ["./", "index.html", "config.js", "gs.js",
+  "manifest.webmanifest", "icon-192.png", "icon-512.png", "pdf-lib.min.js", "fontkit.umd.min.js", "ica-gras.pdf", "ica-maigre.pdf", "comicneue.ttf"];
 
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting())); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 
 function blobFromDb(id) {
   return new Promise((res, rej) => {
-    const r = indexedDB.open("registre-canards-gras", 1);
-    r.onupgradeneeded = () => { const d = r.result; if (!d.objectStoreNames.contains("docs")) d.createObjectStore("docs"); if (!d.objectStoreNames.contains("blobs")) d.createObjectStore("blobs"); };
+    const r = indexedDB.open("registre-canards-sheets", 1);
+    r.onupgradeneeded = () => { const d = r.result; for (const s of ["docs", "meta", "blobs"]) if (!d.objectStoreNames.contains(s)) d.createObjectStore(s); };
     r.onerror = () => rej(r.error);
     r.onsuccess = () => { const q = r.result.transaction("blobs").objectStore("blobs").get(id); q.onsuccess = () => res(q.result); q.onerror = () => rej(q.error); };
   });
@@ -17,14 +18,13 @@ function blobFromDb(id) {
 
 self.addEventListener("fetch", e => {
   const url = new URL(e.request.url);
-  const m = url.origin === location.origin && url.pathname.match(/\/_blob\/([0-9a-f]+)$/);
+  const same = url.origin === location.origin, fonts = /^fonts\.(googleapis|gstatic)\.com$/.test(url.hostname);
+  const m = same && url.pathname.match(/\/_blob\/([0-9a-f]+)$/);
   if (m) {
-    e.respondWith(blobFromDb(m[1]).then(b => b ? new Response(b.data, { headers: { "Content-Type": b.type } }) : new Response("Fichier introuvable sur cet appareil", { status: 404 })));
+    e.respondWith(blobFromDb(m[1]).then(b => b ? new Response(b.data, { headers: { "Content-Type": b.type } }) : new Response("Ce fichier a été fait sur un autre appareil : il n'est pas sur celui-ci.", { status: 404, headers: { "Content-Type": "text/plain; charset=utf-8" } })));
     return;
   }
-  if (e.request.method !== "GET") return;
-  // Fichiers de l'appli : d'abord le cache (marche sans réseau), mise à jour en arrière-plan quand le réseau répond.
-  // Polices Google : gardées en cache après la première ouverture avec connexion.
+  if (e.request.method !== "GET" || !(same || fonts)) return;
   e.respondWith(caches.open(CACHE).then(async c => {
     const hit = await c.match(e.request, { ignoreSearch: true });
     const net = fetch(e.request).then(r => { if (r && (r.ok || r.type === "opaque")) c.put(e.request, r.clone()); return r; }).catch(() => null);
