@@ -1572,9 +1572,26 @@ function renderIcaList(C) {
   const fs = fichesIca(C), list = $("#icaList");
   $("#icaDot").hidden = !fs.some(fi => !state.ica[fi.key]?.pdf && fi.enl.at(-1).date >= today());
   if (!ready()) return list.replaceChildren(el("div", { class: "empty" }, "Chargement…"));
-  list.replaceChildren(...(fs.length ? fs.map(fi => { const it = icaItem(fi); it.querySelector(".row b").prepend("Lot " + fi.lot.numero + " · "); return it; })
-    : [el("div", { class: "empty" }, el("b", {}, "Aucune fiche pour l'instant. "), "Saisissez dans Mouvements un « Départ abattoir » (salle de gavage) avec la date prévue d'abattage : la fiche ICA de la semaine apparaîtra ici.")]));
+  if (!fs.length) return list.replaceChildren(el("div", { class: "empty" }, el("b", {}, "Aucune fiche pour l'instant. "), "Saisissez dans Mouvements un « Départ abattoir » (salle de gavage) avec la date prévue d'abattage : la fiche ICA de la semaine apparaîtra ici."));
+  // Rangement par semaine d'abattage : on touche une semaine pour voir toutes ses fiches.
+  const par = {}; for (const fi of fs) (par[fi.sem] || (par[fi.sem] = [])).push(fi);
+  const sems = Object.keys(par).sort().reverse(), cette = mondayOf(today());
+  if (icaSem === null) icaSem = sems.includes(cette) ? cette : (sems.find(s => s <= cette) || sems.at(-1));
+  list.replaceChildren(...sems.flatMap(sem => {
+    const arr = par[sem].sort((a, b) => a.kind.localeCompare(b.kind) || String(a.lot.numero).localeCompare(String(b.lot.numero)) || a.no - b.no);
+    const ouvert = icaSem === sem, n = arr.reduce((s, fi) => s + fi.enl.reduce((t, e) => t + e.n, 0), 0);
+    const aFaire = arr.filter(fi => { const d = state.ica[fi.key]; return !d?.pdf || d.sigEnl !== icaSig(fi); }).length;
+    const gras = arr.filter(fi => fi.kind === "gras").length, maigre = arr.length - gras;
+    const head = el("button", { type: "button", class: "item" + (sem === cette ? " current" : ""), onclick: () => { icaSem = ouvert ? "" : sem; renderIcaList(lastC || compute()); } },
+      el("div", { class: "row" }, el("b", {}, (ouvert ? "▾ " : "▸ ") + "Semaine du " + fmtDate(sem)), el("span", { class: "sub num" }, [gras ? plural(gras, "fiche") + " gras" : "", maigre ? plural(maigre, "fiche") + " maigre" : ""].filter(Boolean).join(" · "))),
+      el("div", { class: "chips" }, el("span", { class: "chip num" }, plural(n, "canard")),
+        aFaire ? el("span", { class: "chip todo" }, fmtN(aFaire) + " PDF à faire") : el("span", { class: "chip treat" }, "Tous les PDF prêts")));
+    if (!ouvert) return [head];
+    return [head, el("div", { class: "list", style: "padding-left:14px;border-left:3px solid var(--accent);margin:-4px 0 6px 6px" },
+      ...arr.map(fi => { const it = icaItem(fi); it.querySelector(".row b").prepend("Lot " + fi.lot.numero + " · "); it.querySelector(".row .sub")?.remove(); return it; }))];
+  }));
 }
+let icaSem = null;
 function icaItem(fi) {
   const doc = state.ica[fi.key], stale = doc && doc.sigEnl !== icaSig(fi);
   return el("button", { type: "button", class: "item", onclick: () => openIca(fi.key) },
