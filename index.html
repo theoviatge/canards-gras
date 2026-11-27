@@ -1588,10 +1588,27 @@ function renderIcaList(C) {
         aFaire ? el("span", { class: "chip todo" }, fmtN(aFaire) + " PDF à faire") : el("span", { class: "chip treat" }, "Tous les PDF prêts")));
     if (!ouvert) return [head];
     return [head, el("div", { class: "list", style: "padding-left:14px;border-left:3px solid var(--accent);margin:-4px 0 6px 6px" },
-      ...arr.map(fi => { const it = icaItem(fi); it.querySelector(".row b").prepend("Lot " + fi.lot.numero + " · "); it.querySelector(".row .sub")?.remove(); return it; }))];
+      ...arr.map(fi => { const it = icaItem(fi); it.querySelector(".row b").prepend("Lot " + fi.lot.numero + " · "); it.querySelector(".row .sub")?.remove(); return it; }),
+      el("button", { type: "button", class: "btn primary", style: "width:100%", disabled: aFaire ? true : null, onclick: () => icaEnvoiSemaine(sem, arr) },
+        aFaire ? `Envoi de la semaine : créez d'abord ${aFaire > 1 ? "les " + aFaire + " PDF manquants" : "le PDF manquant"}` : `Envoyer les ${arr.length > 1 ? arr.length + " fiches" : "la fiche"} de la semaine à ${CR_MAIL}`))];
   }));
 }
 let icaSem = null;
+// Envoi groupé : toutes les fiches ICA de la semaine dans un seul mail (feuille de partage du téléphone, ou téléchargement + mail sur ordinateur).
+async function icaEnvoiSemaine(sem, arr) {
+  try { navigator.clipboard.writeText(CR_MAIL).then(() => toast("Adresse " + CR_MAIL + " copiée : collez-la comme destinataire"), () => {}); } catch (e) {}
+  const title = "Fiches ICA canards - semaine du " + fmtDate(sem);
+  const nom = fi => state.ica[fi.key]?.nom || icaName(fi);
+  const text = `Bonjour,\n\nVeuillez trouver ci-joint les fiches ICA de la semaine du ${fmtDate(sem)} :\n` + arr.map(fi => "- " + nom(fi).replace(/\.pdf$/, "")).join("\n") + "\n\nCordialement,\nLa Ferme du Lacas";
+  let files;
+  try {
+    files = await Promise.all(arr.map(async fi => { const r = await fetch("_blob/" + state.ica[fi.key].pdf); if (!r.ok) throw new Error("pdf"); return new File([await r.arrayBuffer()], nom(fi), { type: "application/pdf" }); }));
+  } catch (e) { return toast("Un PDF n'est pas sur cet appareil : ouvrez la fiche et refaites le PDF ici."); }
+  try { if (navigator.canShare && navigator.canShare({ files })) { await navigator.share({ files, title, text }); return; } } catch (e) { if (e && e.name === "AbortError") return; }
+  for (const f of files) { await download(await f.arrayBuffer(), f.name); await new Promise(r => setTimeout(r, 400)); }
+  toast(files.length + " PDF téléchargés : joignez-les au mail qui s'ouvre");
+  location.href = "mailto:" + CR_MAIL + "?subject=" + encodeURIComponent(title) + "&body=" + encodeURIComponent(text);
+}
 function icaItem(fi) {
   const doc = state.ica[fi.key], stale = doc && doc.sigEnl !== icaSig(fi);
   return el("button", { type: "button", class: "item", onclick: () => openIca(fi.key) },
